@@ -6,111 +6,122 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Set SHAP to display full feature names
+# Activer SHAP JS pour un affichage interactif
 shap.initjs()
 
 def load_data(relative_path: str) -> pd.DataFrame:
     """
-    Load a CSV file into a pandas DataFrame using a path relative to this script.
+    Charge un fichier CSV en DataFrame en vérifiant son existence.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     full_path = os.path.join(script_dir, relative_path)
-    print("Loading test data from:", full_path)
+
+    if not os.path.exists(full_path):
+        raise FileNotFoundError(f"❌ Le fichier {full_path} est introuvable.")
+
+    print(f"📂 Chargement des données depuis : {full_path}")
     df = pd.read_csv(full_path)
-    print(f"Loaded test data with {df.shape[0]} rows and {df.shape[1]} columns.")
+    print(f"✅ Données chargées ({df.shape[0]} lignes, {df.shape[1]} colonnes).")
     return df
 
 def reindex_features(X: pd.DataFrame, model) -> pd.DataFrame:
     """
-    Ensure the feature set matches the trained model.
+    Assure que les features correspondent au modèle.
     """
     if hasattr(model, "feature_names_in_"):
         training_features = list(model.feature_names_in_)
-        print(f"Reindexing test data to {len(training_features)} features...")
+        print(f"🔄 Reindexation des features ({len(training_features)} features)...")
         X = X.reindex(columns=training_features, fill_value=0)
     else:
-        print("Model does not have 'feature_names_in_'; using X as is.")
+        print("⚠️ Le modèle ne contient pas 'feature_names_in_'")
     return X
 
 def load_latest_models(models_dir: str) -> dict:
     """
-    Load the latest trained models dynamically from the models directory.
+    Charge les modèles les plus récents depuis le dossier.
     """
-    model_files = [f for f in os.listdir(models_dir) if f.endswith(".pkl")]
-    loaded_models = {}
+    if not os.path.exists(models_dir):
+        raise FileNotFoundError(f"❌ Dossier de modèles introuvable : {models_dir}")
 
+    model_files = [f for f in os.listdir(models_dir) if f.endswith(".pkl")]
+    if not model_files:
+        raise FileNotFoundError("❌ Aucun modèle trouvé dans le dossier !")
+
+    loaded_models = {}
     for model_name in ["RandomForest", "XGBoost", "LightGBM"]:
-        latest_model_file = sorted(
+        latest_model = sorted(
             [f for f in model_files if f.startswith(model_name)], reverse=True
         )
-        if latest_model_file:
-            model_path = os.path.join(models_dir, latest_model_file[0])
+        if latest_model:
+            model_path = os.path.join(models_dir, latest_model[0])
             loaded_models[model_name] = joblib.load(model_path)
-            print(f"✅ Loaded latest {model_name} model from {model_path}")
+            print(f"✅ {model_name} chargé depuis {model_path}")
         else:
-            print(f"⚠️ Warning: No trained {model_name} model found!")
-    
-    if not loaded_models:
-        print("❌ No models were loaded. Please verify your models folder.")
-    
+            print(f"⚠️ Aucun modèle {model_name} trouvé.")
+
     return loaded_models
 
 def create_shap_plots(model, X_test, model_name, output_dir):
     """
-    Generate SHAP summary plots for a given model.
+    Génère et affiche les graphiques SHAP.
     """
-    print(f"Generating SHAP explanations for {model_name}...")
+    print(f"📊 Génération des explications SHAP pour {model_name}...")
 
     try:
         explainer = shap.Explainer(model, X_test)
         shap_values = explainer(X_test)
 
+        # Création du dossier si inexistant
+        os.makedirs(output_dir, exist_ok=True)
+
         # SHAP Summary Plot
-        plt.figure()
+        plt.figure(figsize=(8, 6))
         shap.summary_plot(shap_values, X_test, show=False)
         summary_path = os.path.join(output_dir, f"{model_name}_shap_summary.png")
         plt.savefig(summary_path, bbox_inches="tight")
-        print(f"📊 SHAP summary plot saved for {model_name}")
+        plt.show()
+        print(f"📸 SHAP summary plot sauvegardé : {summary_path}")
 
         # SHAP Feature Importance Plot
-        plt.figure()
+        plt.figure(figsize=(8, 6))
         shap.plots.bar(shap_values, show=False)
         bar_path = os.path.join(output_dir, f"{model_name}_shap_bar.png")
         plt.savefig(bar_path, bbox_inches="tight")
-        print(f"📊 SHAP bar plot saved for {model_name}")
+        plt.show()
+        print(f"📸 SHAP bar plot sauvegardé : {bar_path}")
 
     except Exception as e:
-        print(f"⚠️ SHAP analysis failed for {model_name}: {e}")
+        print(f"❌ Erreur lors de la génération SHAP pour {model_name}: {e}")
 
 def main():
-    # Load test data
+    # Chemin des données test
     test_data_path = os.path.join("..", "data", "processed", "bmt_test.csv")
     df_test = load_data(test_data_path)
-    
-    # Check target column exists
-    if "survival_status" not in df_test.columns:
-        raise ValueError("Target column 'survival_status' not found in test data.")
-    
-    # Prepare features
-    X_test = df_test.drop(columns=["survival_status"])
-    X_test = pd.get_dummies(X_test, drop_first=True)  # Ensure numeric format
-    print(f"Test data after encoding: {X_test.shape}")
 
-    # Load latest models
+    # Vérification de la colonne cible
+    if "survival_status" not in df_test.columns:
+        raise ValueError("❌ Colonne cible 'survival_status' manquante !")
+
+    # Préparation des features
+    X_test = df_test.drop(columns=["survival_status"])
+    X_test = pd.get_dummies(X_test, drop_first=True)  # Encodage catégoriel
+    print(f"🔍 Données test transformées : {X_test.shape}")
+
+    # Chargement des modèles
     script_dir = os.path.dirname(os.path.abspath(__file__))
     models_dir = os.path.join(script_dir, "..", "models")
     models = load_latest_models(models_dir)
 
     if not models:
-        return  # Exit if no models were found
+        return  # Arrêt si aucun modèle n'est chargé
 
-    # Create SHAP output directory
+    # Dossier de sortie pour SHAP
     shap_dir = os.path.join(script_dir, "..", "shap_analysis")
     os.makedirs(shap_dir, exist_ok=True)
 
-    # Generate SHAP analysis for each model
+    # Génération des analyses SHAP pour chaque modèle
     for model_name, model in models.items():
-        print(f"\n🔍 Analyzing {model_name} with SHAP...")
+        print(f"\n🔍 Analyse SHAP pour {model_name}...")
         X_test_reindexed = reindex_features(X_test, model)
         create_shap_plots(model, X_test_reindexed, model_name, shap_dir)
 
